@@ -1,6 +1,16 @@
 # BankBin - 银行BIN码查询
 
-GitHub 项目主页：[mountopjh/BankBin](https://github.com/mountopjh/BankBin)
+[![GitCode 镜像](https://img.shields.io/badge/GitCode-国内镜像仓库-red.svg)](https://gitcode.com/mountop2026/BankBin)
+[![GitHub 官方](https://img.shields.io/badge/GitHub-官方仓库-blue.svg)](https://github.com/mountopjh/BankBin)
+[![最新发布版本](https://img.shields.io/badge/Release-v1.7.4-green.svg)](https://github.com/mountopjh/BankBin/releases/tag/v1.7.4)
+
+### 📥 单文件 EXE 直接下载
+
+| 下载渠道 | 下载地址 | 说明 |
+| :--- | :--- | :--- |
+| **国内 GitCode 下载** | [GitCode 发行版页面](https://gitcode.com/mountop2026/BankBin/releases) | 推荐国内用户使用，下载极速 |
+| **GitHub 官方下载** | [BankBin_008.exe (v1.7.4 直链)](https://github.com/mountopjh/BankBin/releases/download/v1.7.4/BankBin_008.exe) | 官方最新发行版直链 |
+| **GitHub 历史版本** | [GitHub Releases 汇总](https://github.com/mountopjh/BankBin/releases) | 历史所有版本归档 |
 
 这是一款专用于查询银行卡 BIN 码及其归属机构的跨平台本地化工具。支持以下核心功能：
 - 桌面悬浮窗快捷键查询（选中卡号一键弹出结果）
