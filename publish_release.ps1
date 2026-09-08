@@ -19,7 +19,14 @@ if (Test-Path $manifestPath) {
     }
 }
 if (-not $tag) {
-    $tag = "v1.7.4"
+    $tag = "v1.7.5"
+}
+if (-not $manifest) {
+    $manifest = [PSCustomObject]@{
+        version = $tag
+        download_url = ""
+        sha256 = ""
+    }
 }
 
 Write-Host "[1/5] 当前待发布版本: $tag" -ForegroundColor Green
@@ -34,6 +41,16 @@ if ($latestExe) {
     Write-Host "[ERROR] 未在 $releaseDir 中找到已编译的 EXE 文件，请先运行 build_root_exe.bat 进行打包！" -ForegroundColor Red
     exit 1
 }
+
+# Make the update manifest describe the exact executable uploaded below.
+$manifest.version = $tag
+$manifest.download_url = "https://github.com/mountopjh/BankBin/releases/download/$tag/$($latestExe.Name)"
+$manifest.sha256 = (Get-FileHash -LiteralPath $latestExe.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+$manifestJson = $manifest | ConvertTo-Json
+$utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
+$manifestFullPath = [System.IO.Path]::GetFullPath($manifestPath)
+[System.IO.File]::WriteAllText($manifestFullPath, $manifestJson, $utf8WithoutBom)
+Write-Host ">> 更新清单已同步: $($latestExe.Name)" -ForegroundColor Green
 
 # 3. 提交未保存的修改并推送代码及 Tags 到 GitCode 和 GitHub
 Write-Host "

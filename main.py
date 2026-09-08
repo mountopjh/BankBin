@@ -7,6 +7,7 @@ import sys
 import tempfile
 import threading
 import time
+import secrets
 import webbrowser
 from ctypes import wintypes
 from datetime import datetime
@@ -33,6 +34,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
+from app_paths import APP_DATA_DIR, BUNDLE_DIR
 from data_manager import DB_PATH
 from panels.registry import build_default_registry
 from query_engine import clear_all_history, get_query_history, perform_full_query
@@ -42,7 +44,7 @@ from ui_popup import ResultPopup
 sys.excepthook = crash_reporter.write_crash_log
 
 APP_NAME = "BankBin"
-APP_VERSION = "v1.7.4"
+APP_VERSION = "v1.7.5"
 HOTKEY_DEFAULT = "f6"
 DEFAULT_LOGIN_USERNAME = "bljw"
 DEFAULT_LOGIN_PASSWORD = "89625727"
@@ -61,6 +63,8 @@ GITHUB_BIN_WEB_URL = f"https://github.com/{GITHUB_REPO}/blob/main/{BIN_TRACK_PAT
 UPDATE_INTERVAL_MS = 5 * 60 * 1000
 UPDATE_DOWNLOAD_TIMEOUT = (8, 45)
 UPDATE_DOWNLOAD_CHUNK_SIZE = 512 * 1024
+UPDATE_HELPER_NAME = "update_helper.ps1"
+UPDATE_LOG_PATH = os.path.join(APP_DATA_DIR, "update.log")
 
 
 def format_now_seconds() -> str:
@@ -936,7 +940,12 @@ class BinApp(QApplication):
 
     def _fetch_update_manifest(self):
         try:
-            resp = requests.get(UPDATE_MANIFEST_URL, timeout=7)
+            resp = requests.get(
+                UPDATE_MANIFEST_URL,
+                headers={**UPDATE_REQUEST_HEADERS, "Cache-Control": "no-cache"},
+                params={"_": int(time.time())},
+                timeout=7,
+            )
             if resp.status_code != 200:
                 return None
             data = resp.json() or {}
@@ -1145,12 +1154,16 @@ class BinApp(QApplication):
             if expected_sha256 and actual_sha256 != expected_sha256:
                 raise RuntimeError("安装包 SHA-256 校验失败，已停止更新。")
 
-            helper_path = self._write_update_helper(download_path, target_path)
+            helper_path = self._prepare_update_helper(update_dir)
+            update_token = secrets.token_hex(24)
             QMetaObject.invokeMethod(
                 self,
                 "on_update_download_ready",
                 Qt.ConnectionType.QueuedConnection,
                 Q_ARG(str, helper_path),
+                Q_ARG(str, download_path),
+                Q_ARG(str, target_path),
+                Q_ARG(str, update_token),
             )
         except Exception as exc:
             for path in (helper_path, download_path):
@@ -1172,41 +1185,13 @@ class BinApp(QApplication):
             )
 
     @staticmethod
-    def _batch_path_value(path: str) -> str:
-        return os.path.abspath(path).replace("%", "%%")
-
-    def _write_update_helper(self, download_path: str, target_path: str) -> str:
-        helper_path = os.path.join(os.path.dirname(download_path), "install_update.cmd")
-        source_value = self._batch_path_value(download_path)
-        target_value = self._batch_path_value(target_path)
-        script = "\r\n".join(
-            [
-                "@echo off",
-                "setlocal EnableExtensions DisableDelayedExpansion",
-                f'set "SOURCE={source_value}"',
-                f'set "TARGET={target_value}"',
-                "set /a ATTEMPTS=0",
-                ":copy_again",
-                'copy /Y "%SOURCE%" "%TARGET%" >nul',
-                "if not errorlevel 1 goto start_app",
-                "set /a ATTEMPTS+=1",
-                "if %ATTEMPTS% GEQ 30 goto start_from_download",
-                "timeout /t 1 /nobreak >nul",
-                "goto copy_again",
-                ":start_app",
-                'start "" "%TARGET%"',
-                'del "%SOURCE%" >nul 2>nul',
-                'del "%~f0" >nul 2>nul',
-                "exit /b 0",
-                ":start_from_download",
-                'start "" "%SOURCE%"',
-                'del "%~f0" >nul 2>nul',
-                "exit /b 1",
-                "",
-            ]
-        )
-        with open(helper_path, "w", encoding="mbcs", newline="") as file:
-            file.write(script)
+    def _prepare_update_helper(update_dir: str) -> str:
+        bundled_helper = os.path.join(BUNDLE_DIR, UPDATE_HELPER_NAME)
+        if not os.path.isfile(bundled_helper):
+            raise RuntimeError("更新助手缺失，请重新下载安装完整版本。")
+        helper_path = os.path.join(update_dir, UPDATE_HELPER_NAME)
+        with open(bundled_helper, "rb") as source, open(helper_path, "wb") as target:
+            target.write(source.read())
         return helper_path
 
     @pyqtSlot(int)
@@ -1214,15 +1199,37 @@ class BinApp(QApplication):
         if self._update_installing:
             self.action_version_update.setText(f"版本更新：正在下载 {percent}%")
 
-    @pyqtSlot(str)
-    def on_update_download_ready(self, helper_path: str):
+    @pyqtSlot(str, str, str, str)
+    def on_update_download_ready(
+        self, helper_path: str, download_path: str, target_path: str, update_token: str
+    ):
         try:
             creationflags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(
                 subprocess, "CREATE_NEW_PROCESS_GROUP", 0
-            )
+            ) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
             subprocess.Popen(
-                ["cmd.exe", "/c", helper_path],
-                cwd=os.path.dirname(helper_path),
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-WindowStyle",
+                    "Hidden",
+                    "-File",
+                    helper_path,
+                    "-Source",
+                    download_path,
+                    "-Target",
+                    target_path,
+                    "-OldPid",
+                    str(os.getpid()),
+                    "-LogPath",
+                    UPDATE_LOG_PATH,
+                    "-Token",
+                    update_token,
+                ],
+                cwd=os.path.dirname(target_path),
                 close_fds=True,
                 creationflags=creationflags,
             )
@@ -1762,5 +1769,15 @@ class BinApp(QApplication):
 
 
 if __name__ == "__main__":
+    update_ack_path = os.environ.pop("BANKBIN_UPDATE_ACK", "")
+    update_ack_token = os.environ.pop("BANKBIN_UPDATE_TOKEN", "")
+    if update_ack_path and update_ack_token:
+        try:
+            ack_temp_path = update_ack_path + ".tmp"
+            with open(ack_temp_path, "w", encoding="ascii") as ack_file:
+                ack_file.write(update_ack_token)
+            os.replace(ack_temp_path, update_ack_path)
+        except OSError:
+            pass
     app = BinApp(sys.argv)
     sys.exit(app.exec())
