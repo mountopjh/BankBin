@@ -105,6 +105,22 @@ if not defined BUILD_SEQ (
 set "BUILD_NAME=BankBin_!BUILD_SEQ!"
 set "BANKBIN_BUILD_NAME=!BUILD_NAME!"
 
+echo [INFO] Building native update helper...
+"%PY%" -m PyInstaller ^
+  --clean ^
+  --noconfirm ^
+  --onefile ^
+  --noconsole ^
+  --name BankBinUpdater ^
+  --distpath ".\build\updater_dist" ^
+  --workpath ".\build\updater_work" ^
+  --specpath ".\build" ^
+  ".\update_helper.py"
+if errorlevel 1 (
+  echo [ERROR] Update helper build failed.
+  exit /b 1
+)
+
 echo [INFO] Building !BUILD_NAME!.exe...
 "%PY%" -m PyInstaller ^
   --clean ^

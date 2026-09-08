@@ -44,7 +44,7 @@ from ui_popup import ResultPopup
 sys.excepthook = crash_reporter.write_crash_log
 
 APP_NAME = "BankBin"
-APP_VERSION = "v1.7.5"
+APP_VERSION = "v1.7.6"
 HOTKEY_DEFAULT = "f6"
 DEFAULT_LOGIN_USERNAME = "bljw"
 DEFAULT_LOGIN_PASSWORD = "89625727"
@@ -63,7 +63,7 @@ GITHUB_BIN_WEB_URL = f"https://github.com/{GITHUB_REPO}/blob/main/{BIN_TRACK_PAT
 UPDATE_INTERVAL_MS = 5 * 60 * 1000
 UPDATE_DOWNLOAD_TIMEOUT = (8, 45)
 UPDATE_DOWNLOAD_CHUNK_SIZE = 512 * 1024
-UPDATE_HELPER_NAME = "update_helper.ps1"
+UPDATE_HELPER_NAME = "BankBinUpdater.exe"
 UPDATE_LOG_PATH = os.path.join(APP_DATA_DIR, "update.log")
 
 
@@ -1053,15 +1053,7 @@ class BinApp(QApplication):
         except Exception:
             pass
         self.action_version_update.triggered.connect(self.install_available_update)
-        if install_if_available:
-            self.install_available_update(silent=True)
-            return
-        self.tray_icon.showMessage(
-            "版本更新",
-            f"发现新版本 {latest_version.upper()}，点击菜单将自动下载并安装。",
-            QSystemTrayIcon.MessageIcon.Information,
-            3000,
-        )
+        self.install_available_update(silent=True)
 
     @pyqtSlot(str, bool)
     def on_version_update_checked(self, latest_version: str, install_if_available: bool):
@@ -1209,24 +1201,16 @@ class BinApp(QApplication):
             ) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
             subprocess.Popen(
                 [
-                    "powershell.exe",
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-WindowStyle",
-                    "Hidden",
-                    "-File",
                     helper_path,
-                    "-Source",
+                    "--source",
                     download_path,
-                    "-Target",
+                    "--target",
                     target_path,
-                    "-OldPid",
+                    "--old-pid",
                     str(os.getpid()),
-                    "-LogPath",
+                    "--log-path",
                     UPDATE_LOG_PATH,
-                    "-Token",
+                    "--token",
                     update_token,
                 ],
                 cwd=os.path.dirname(target_path),

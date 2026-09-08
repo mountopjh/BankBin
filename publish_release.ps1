@@ -19,7 +19,7 @@ if (Test-Path $manifestPath) {
     }
 }
 if (-not $tag) {
-    $tag = "v1.7.5"
+    $tag = "v1.7.6"
 }
 if (-not $manifest) {
     $manifest = [PSCustomObject]@{

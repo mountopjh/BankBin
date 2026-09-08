@@ -3,13 +3,14 @@
 import os
 
 BUILD_NAME = os.environ.get('BANKBIN_BUILD_NAME', 'BankBin')
+UPDATER_EXE = os.path.join('build', 'updater_dist', 'BankBinUpdater.exe')
 
 
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('bin_database.db', '.'), ('update_helper.ps1', '.'), ('PANELS.md', '.'), ('README.md', '.'), ('代码地图.md', '.'), ('规划地图.md', '.')],
+    datas=[('bin_database.db', '.'), (UPDATER_EXE, '.'), ('PANELS.md', '.'), ('README.md', '.'), ('代码地图.md', '.'), ('规划地图.md', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
