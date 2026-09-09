@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from icon_assets import get_app_icon, get_icon
 from panels.base import PanelModule
 from query_engine import get_query_history, perform_full_query
 
@@ -32,6 +33,7 @@ class BinQueryPanel(PanelModule):
     def create_widget(self) -> QWidget:
         widget = QWidget()
         widget.setWindowTitle("BankBin")
+        widget.setWindowIcon(get_app_icon())
         widget.resize(760, 460)
         widget.setStyleSheet(
             """
@@ -75,15 +77,23 @@ class BinQueryPanel(PanelModule):
         layout.setContentsMargins(18, 16, 18, 16)
         layout.setSpacing(10)
 
+        title_row = QHBoxLayout()
+        title_row.setSpacing(8)
+        icon_lbl = QLabel()
+        icon_lbl.setPixmap(get_app_icon().pixmap(22, 22))
         title = QLabel("BankBin")
         title.setObjectName("title")
-        layout.addWidget(title)
+        title_row.addWidget(icon_lbl)
+        title_row.addWidget(title)
+        title_row.addStretch()
+        layout.addLayout(title_row)
 
         row = QHBoxLayout()
         self._input = QLineEdit()
         self._input.setPlaceholderText("输入银行卡号或 BIN")
         self._input.returnPressed.connect(self._query_current)
-        btn_query = QPushButton("查询")
+        btn_query = QPushButton(" 查询")
+        btn_query.setIcon(get_icon("search"))
         btn_query.clicked.connect(self._query_current)
         row.addWidget(self._input, 1)
         row.addWidget(btn_query)

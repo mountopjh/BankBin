@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import QPoint, Qt, QTimer
-from PyQt6.QtWidgets import QFrame, QGridLayout, QLabel, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+
+
+from icon_assets import get_icon
 
 
 class ResultPopup(QWidget):
@@ -49,12 +52,12 @@ class ResultPopup(QWidget):
         data = record if isinstance(record, dict) else {}
 
         if data.get("_status") == "searching":
-            self._add_title("正在查询")
+            self._add_title("正在查询", is_searching=True)
             self._add_row(1, "卡号", card_number)
             self._add_row(2, "来源", data.get("website_text", "网络查询"))
             timeout_ms = 1800
         else:
-            self._add_title("查询结果")
+            self._add_title("查询结果", is_searching=False)
             self._add_row(1, "卡号", card_number)
             self._add_row(2, "BIN", data.get("bin_code", "-"))
             self._add_row(3, "银行", data.get("bank_name", "未查询到"))
@@ -73,10 +76,20 @@ class ResultPopup(QWidget):
         self._timer.stop()
         self.hide()
 
-    def _add_title(self, text: str) -> None:
+    def _add_title(self, text: str, is_searching: bool = False) -> None:
+        title_box = QWidget()
+        row = QHBoxLayout(title_box)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+        icon_lbl = QLabel()
+        icon = get_icon("update" if is_searching else "bin_search")
+        icon_lbl.setPixmap(icon.pixmap(18, 18))
         label = QLabel(text)
         label.setObjectName("title")
-        self._layout.addWidget(label, 0, 0, 1, 2)
+        row.addWidget(icon_lbl)
+        row.addWidget(label)
+        row.addStretch()
+        self._layout.addWidget(title_box, 0, 0, 1, 2)
 
     def _add_row(self, row: int, key: str, value: str) -> None:
         key_label = QLabel(key)

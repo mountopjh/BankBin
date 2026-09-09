@@ -1,4 +1,4 @@
-﻿import ctypes
+import ctypes
 import hashlib
 import os
 import re
@@ -40,6 +40,7 @@ from panels.registry import build_default_registry
 from query_engine import clear_all_history, get_query_history, perform_full_query
 from settings_manager import load_settings, save_settings
 from ui_popup import ResultPopup
+from icon_assets import get_app_icon, get_eye_icon, get_icon, get_tray_icon
 
 sys.excepthook = crash_reporter.write_crash_log
 
@@ -86,15 +87,20 @@ def format_iso_seconds(value: str) -> str:
         return text[:19] if len(text) >= 19 else text
 
 
-_MUTEX = ctypes.windll.kernel32.CreateMutexW(None, False, "BankBin_SingleInstance_2026")
-if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-    ctypes.windll.user32.MessageBoxW(
-        None,
-        "程序已在运行中。\n请先关闭已打开的程序窗口后再启动。",
-        APP_NAME,
-        0x40 | 0x1000,
-    )
-    sys.exit(0)
+_MUTEX = None
+
+
+def check_single_instance():
+    global _MUTEX
+    _MUTEX = ctypes.windll.kernel32.CreateMutexW(None, False, "BankBin_SingleInstance_2026")
+    if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+        ctypes.windll.user32.MessageBoxW(
+            None,
+            "程序已在运行中。\n请先关闭已打开的程序窗口后再启动。",
+            APP_NAME,
+            0x40 | 0x1000,
+        )
+        sys.exit(0)
 
 
 class GlobalSignalSender(QObject):
@@ -106,6 +112,7 @@ class LoginDialog(QDialog):
     def __init__(self, default_username: str = "", default_password: str = "", history=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("账号登录")
+        self.setWindowIcon(get_app_icon())
         self.setFixedSize(390, 270)
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.WindowCloseButtonHint)
 
@@ -144,17 +151,17 @@ class LoginDialog(QDialog):
             }
             QPushButton#login:hover { background-color: #1C97EA; }
             QPushButton#eye {
-                min-width: 56px;
-                max-width: 56px;
+                min-width: 44px;
+                max-width: 44px;
                 border: 1px solid #D0D3DC;
                 border-radius: 5px;
                 background-color: #F7F8FC;
-                color: #9AA0A6;
-                font-size: 12px;
-                font-weight: bold;
+            }
+            QPushButton#eye:hover {
+                border-color: #007ACC;
+                background-color: #FFFFFF;
             }
             QPushButton#eye:checked {
-                color: #007ACC;
                 border-color: #007ACC;
                 background-color: #FFFFFF;
             }
@@ -192,22 +199,18 @@ class LoginDialog(QDialog):
         self.btn_eye = QPushButton("")
         self.btn_eye.setObjectName("eye")
         self.btn_eye.setCheckable(True)
-        self.btn_eye.setToolTip("显示/隐藏密码")
-        self._eye_icon_visible = self._load_eye_icon(["view-visible", "password-show-on", "visibility"])
-        self._eye_icon_hidden = self._load_eye_icon(["view-hidden", "password-show-off", "visibility-off"])
-        self._has_eye_icons = not self._eye_icon_visible.isNull() and not self._eye_icon_hidden.isNull()
-        self.btn_eye.setIconSize(QSize(16, 16))
-        if self._has_eye_icons:
-            self.btn_eye.setIcon(self._eye_icon_hidden)
-            self.btn_eye.setText("")
-            self.btn_eye.setToolTip("显示密码")
-        else:
-            self.btn_eye.setText("可见")
-            self.btn_eye.setToolTip("显示密码")
+        self.btn_eye.setToolTip("显示密码")
+        self._eye_icon_visible = get_eye_icon(visible=True)
+        self._eye_icon_hidden = get_eye_icon(visible=False)
+        self._has_eye_icons = True
+        self.btn_eye.setIconSize(QSize(20, 20))
+        self.btn_eye.setIcon(self._eye_icon_hidden)
         self.btn_eye.toggled.connect(self._toggle_password_visible)
 
-        btn_login = QPushButton("登录")
+        btn_login = QPushButton(" 登录")
         btn_login.setObjectName("login")
+        btn_login.setIcon(get_icon("login"))
+        btn_login.setIconSize(QSize(16, 16))
 
         pass_row = QHBoxLayout()
         pass_row.setSpacing(6)
@@ -228,21 +231,14 @@ class LoginDialog(QDialog):
         self.input_pass.clear()
 
     def _load_eye_icon(self, names):
-        for name in names:
-            icon = QIcon.fromTheme(name)
-            if not icon.isNull():
-                return icon
-        return QIcon()
+        return get_eye_icon(visible=True)
 
     def _toggle_password_visible(self, checked: bool):
         self.input_pass.setEchoMode(
             QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password
         )
-        if self._has_eye_icons:
-            self.btn_eye.setIcon(self._eye_icon_visible if checked else self._eye_icon_hidden)
-            self.btn_eye.setText("")
-        else:
-            self.btn_eye.setText("不可见" if checked else "可见")
+        self.btn_eye.setIcon(self._eye_icon_visible if checked else self._eye_icon_hidden)
+        self.btn_eye.setText("")
         self.btn_eye.setToolTip("隐藏密码" if checked else "显示密码")
 
     def _do_accept(self):
@@ -261,6 +257,7 @@ class HotkeySettingDialog(QDialog):
     def __init__(self, current_hotkey: str, parent=None):
         super().__init__(parent)
         self.setWindowTitle("监听快捷键设置")
+        self.setWindowIcon(get_app_icon())
         self.setFixedSize(380, 180)
         self._recording = False
 
@@ -298,7 +295,8 @@ class HotkeySettingDialog(QDialog):
         row = QHBoxLayout()
         self.input_hotkey = QLineEdit(current_hotkey.upper() if current_hotkey else "F6")
         self.input_hotkey.installEventFilter(self)
-        self.btn_record = QPushButton("录入按键")
+        self.btn_record = QPushButton(" 录入按键")
+        self.btn_record.setIcon(get_icon("hotkey"))
         self.btn_record.clicked.connect(self.toggle_recording)
         row.addWidget(self.input_hotkey)
         row.addWidget(self.btn_record)
@@ -306,9 +304,11 @@ class HotkeySettingDialog(QDialog):
 
         row2 = QHBoxLayout()
         row2.addStretch()
-        btn_ok = QPushButton("保存")
+        btn_ok = QPushButton(" 保存")
         btn_ok.setObjectName("ok")
-        btn_cancel = QPushButton("取消")
+        btn_ok.setIcon(get_icon("check"))
+        btn_cancel = QPushButton(" 取消")
+        btn_cancel.setIcon(get_icon("close"))
         row2.addWidget(btn_ok)
         row2.addWidget(btn_cancel)
         layout.addLayout(row2)
@@ -324,10 +324,10 @@ class HotkeySettingDialog(QDialog):
     def toggle_recording(self):
         self._recording = not self._recording
         if self._recording:
-            self.btn_record.setText("按下快捷键...")
+            self.btn_record.setText(" 按下快捷键...")
             self.input_hotkey.setFocus()
         else:
-            self.btn_record.setText("录入按键")
+            self.btn_record.setText(" 录入按键")
 
     def _event_to_hotkey(self, event) -> str:
         key = event.key()
@@ -357,7 +357,7 @@ class HotkeySettingDialog(QDialog):
             if hotkey:
                 self.input_hotkey.setText(hotkey.upper())
                 self._recording = False
-                self.btn_record.setText("录入按键")
+                self.btn_record.setText(" 录入按键")
             return True
         return super().eventFilter(watched, event)
 
@@ -374,6 +374,7 @@ class LoadingDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("正在加载")
+        self.setWindowIcon(get_app_icon())
         self.setFixedSize(500, 290)
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.CustomizeWindowHint | Qt.WindowType.WindowTitleHint)
 
@@ -437,6 +438,7 @@ class ListenerDebugDialog(QDialog):
         self._last_seq = 0
 
         self.setWindowTitle("监听诊断面板")
+        self.setWindowIcon(get_app_icon())
         self.setFixedSize(760, 520)
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.WindowCloseButtonHint)
 
@@ -483,9 +485,12 @@ class ListenerDebugDialog(QDialog):
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        self.btn_clear = QPushButton("清空日志")
-        self.btn_copy = QPushButton("复制日志")
-        self.btn_close = QPushButton("关闭")
+        self.btn_clear = QPushButton(" 清空日志")
+        self.btn_clear.setIcon(get_icon("trash"))
+        self.btn_copy = QPushButton(" 复制日志")
+        self.btn_copy.setIcon(get_icon("copy"))
+        self.btn_close = QPushButton(" 关闭")
+        self.btn_close.setIcon(get_icon("close"))
         btn_row.addWidget(self.btn_clear)
         btn_row.addWidget(self.btn_copy)
         btn_row.addWidget(self.btn_close)
@@ -559,6 +564,8 @@ class BinApp(QApplication):
     def __init__(self, argv):
         super().__init__(argv)
         self.setQuitOnLastWindowClosed(False)
+        self.icon_app = get_app_icon()
+        self.setWindowIcon(self.icon_app)
 
         self.settings = {}
         self.hotkey = HOTKEY_DEFAULT
@@ -741,23 +748,11 @@ class BinApp(QApplication):
         }
 
     def _build_icon(self, text_color: str, bg_color: str) -> QIcon:
-        pixmap = QPixmap(32, 32)
-        pixmap.fill(Qt.GlobalColor.transparent)
-
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setBrush(QColor(bg_color))
-        painter.setPen(Qt.GlobalColor.transparent)
-        painter.drawRoundedRect(0, 0, 32, 32, 8, 8)
-        painter.setPen(QColor(text_color))
-        painter.setFont(QFont("Microsoft YaHei", 10, QFont.Weight.Bold))
-        painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "Bin")
-        painter.end()
-        return QIcon(pixmap)
+        return get_tray_icon(active=(text_color != "#7A7A7A"))
 
     def init_tray(self):
-        self.icon_normal = self._build_icon("#007ACC", "#FFFFFF")
-        self.icon_gray = self._build_icon("#7A7A7A", "#E0E0E0")
+        self.icon_normal = get_tray_icon(active=True)
+        self.icon_gray = get_tray_icon(active=False)
         self.tray_icon = QSystemTrayIcon(self.icon_normal, self)
 
         self.tray_menu = QMenu()
@@ -765,91 +760,99 @@ class BinApp(QApplication):
             """
             QMenu {
                 background-color: #FFFFFF;
-                border: 1px solid #D0D3DC;
-                border-radius: 8px;
-                padding: 4px 0px;
-                font-family: 'Microsoft YaHei';
+                border: 1px solid #D5DAE6;
+                border-radius: 9px;
+                padding: 6px 4px;
+                font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
                 font-size: 13px;
                 color: #1A1A2E;
             }
             QMenu::item {
-                padding: 9px 28px 9px 18px;
-                margin: 1px 4px;
-                border-radius: 5px;
+                padding: 8px 24px 8px 10px;
+                margin: 2px 4px;
+                border-radius: 6px;
                 color: #1A1A2E;
             }
-            QMenu::item:selected { background-color: #E8F0FE; color: #007ACC; }
-            QMenu::item:disabled { color: #999999; }
-            QMenu::separator { height: 1px; background: #E0E3EE; margin: 4px 10px; }
+            QMenu::item:selected {
+                background-color: #F0F5FF;
+                color: #007ACC;
+            }
+            QMenu::item:disabled {
+                color: #8C93A3;
+            }
+            QMenu::icon {
+                padding-left: 6px;
+            }
+            QMenu::separator {
+                height: 1px;
+                background: #E8EBF2;
+                margin: 5px 8px;
+            }
             """
         )
 
-        self.account_menu = QMenu("当前账号", self.tray_menu)
-        self.action_user = self.account_menu.addAction(
-            f"账号：{self.settings.get('username', DEFAULT_LOGIN_USERNAME) or '--'}"
-        )
-        self.action_user.setEnabled(False)
-        self.action_switch_account = self.account_menu.addAction("切换账号")
-        self.action_switch_account.triggered.connect(self.switch_account)
-        self.tray_menu.addMenu(self.account_menu)
-
-        self.tray_menu.addSeparator()
+        # 1. 核心主功能区
+        self.action_show = self.tray_menu.addAction("打开主界面")
+        font_show = self.action_show.font()
+        font_show.setBold(True)
+        self.action_show.setFont(font_show)
+        self.action_show.setIcon(get_icon("main_panel"))
+        self.action_show.triggered.connect(self.show_main_panel)
 
         self.recent_menu = QMenu("查询记录", self.tray_menu)
+        self.recent_menu.setIcon(get_icon("history"))
         self.tray_menu.addMenu(self.recent_menu)
         self.tray_menu.aboutToShow.connect(self.update_recent_menu)
 
         self.tray_menu.addSeparator()
 
-        self.action_show = self.tray_menu.addAction("主界面")
-        self.action_show.triggered.connect(self.show_main_panel)
-
-        self.panel_menu = QMenu("Panels", self.tray_menu)
-        if self.panel_registry is not None:
-            for panel_id in self.panel_registry.panel_ids():
-                panel = self.panel_registry.get_panel(panel_id)
-                action = self.panel_menu.addAction(panel.panel_name)
-                action.triggered.connect(lambda checked, pid=panel_id: self.show_panel(pid))
-        self.tray_menu.addMenu(self.panel_menu)
-
-        self.tray_menu.addSeparator()
-
-        self.monitor_menu = QMenu("监听设置", self.tray_menu)
-        self.action_toggle = self.monitor_menu.addAction("")
+        # 2. 监听与控制区
+        self.action_toggle = self.tray_menu.addAction("")
         self.action_toggle.triggered.connect(self._toggle_monitoring)
-        self.action_hotkey = self.monitor_menu.addAction("监听快捷键设置")
+
+        self.action_hotkey = self.tray_menu.addAction("快捷键设置")
+        self.action_hotkey.setIcon(get_icon("hotkey"))
         self.action_hotkey.triggered.connect(self.open_hotkey_setting_dialog)
-        self.action_listener_debug = self.monitor_menu.addAction("监听诊断面板")
+
+        self.action_listener_debug = self.tray_menu.addAction("监听诊断面板")
+        self.action_listener_debug.setIcon(get_icon("debug"))
         self.action_listener_debug.triggered.connect(self.open_listener_debug_dialog)
-        self.tray_menu.addMenu(self.monitor_menu)
+
         self._update_toggle_action_text()
 
         self.tray_menu.addSeparator()
 
-        self.update_menu = QMenu("更新", self.tray_menu)
+        # 3. 系统与管理区（直接展示当前账号，不加二级菜单，无切换账号）
+        username = self.settings.get("username", DEFAULT_LOGIN_USERNAME) or "--"
+        self.action_user = self.tray_menu.addAction(f"当前账号：{username}")
+        self.action_user.setIcon(get_icon("account"))
+        self.action_user.setEnabled(False)
+
+        self.update_menu = QMenu("更新与维护", self.tray_menu)
+        self.update_menu.setIcon(get_icon("update"))
         self.action_version_update = self.update_menu.addAction("版本更新：检查中...")
+        self.action_version_update.setIcon(get_icon("version_check"))
         self.action_version_update.setEnabled(False)
         self.action_bin_update = self.update_menu.addAction("BIN码库：检查中...")
+        self.action_bin_update.setIcon(get_icon("bin_db"))
         self.action_bin_update.setEnabled(False)
         self.action_check_update_now = self.update_menu.addAction("立即检查更新")
+        self.action_check_update_now.setIcon(get_icon("refresh"))
         self.action_check_update_now.triggered.connect(self.check_and_install_update)
         self.action_sync_bin_now = self.update_menu.addAction("同步BIN码库")
+        self.action_sync_bin_now.setIcon(get_icon("sync_db"))
         self.action_sync_bin_now.triggered.connect(self.sync_bin_database)
         self.tray_menu.addMenu(self.update_menu)
 
-        self.tray_menu.addSeparator()
-
-        self.about_menu = QMenu(f"关于 - {APP_NAME} {APP_VERSION.upper()}", self.tray_menu)
-        self.act_curr_ver = self.about_menu.addAction(f"当前版本: {APP_VERSION.upper()}")
-        self.act_curr_ver.setEnabled(False)
-        self.tray_menu.addMenu(self.about_menu)
-
-        self.action_time = self.tray_menu.addAction("更新时间: 2026-09-07")
-        self.action_time.setEnabled(False)
+        self.action_about = self.tray_menu.addAction(f"关于 {APP_NAME}...")
+        self.action_about.setIcon(get_icon("about"))
+        self.action_about.triggered.connect(self.show_about_dialog)
 
         self.tray_menu.addSeparator()
 
-        self.action_quit = self.tray_menu.addAction("退出")
+        # 4. 退出程序
+        self.action_quit = self.tray_menu.addAction("退出程序")
+        self.action_quit.setIcon(get_icon("quit"))
         self.action_quit.triggered.connect(self.quit_app)
 
         self.tray_icon.setContextMenu(self.tray_menu)
@@ -1354,7 +1357,9 @@ class BinApp(QApplication):
         self.recent_menu.clear()
         history = get_query_history(success_only=False)[:20]
         if not history:
-            self.recent_menu.addAction("暂无查询记录").setEnabled(False)
+            act = self.recent_menu.addAction("暂无查询记录")
+            act.setIcon(get_icon("empty"))
+            act.setEnabled(False)
             return
         for row in history:
             card_no = row.get("card_no", "") or ""
@@ -1364,7 +1369,52 @@ class BinApp(QApplication):
             source = row.get("source", "") or ""
             text = f"{card_no} | {bank} [{card_type}] 长度:{card_length} ({source})"
             action = self.recent_menu.addAction(text)
+            action.setIcon(get_icon("card_item"))
             action.triggered.connect(lambda checked, num=card_no: self.do_manual_query(num))
+
+        self.recent_menu.addSeparator()
+        act_clear = self.recent_menu.addAction("清空历史记录")
+        act_clear.setIcon(get_icon("trash"))
+        act_clear.triggered.connect(self._confirm_clear_history)
+
+    def _confirm_clear_history(self):
+        reply = QMessageBox.question(
+            None,
+            "清空历史记录",
+            "确定要清空所有本地卡号查询历史记录吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            clear_all_history()
+            if self.main_panel is not None and hasattr(self.main_panel, "refresh"):
+                self.main_panel.refresh()
+            self.tray_icon.showMessage(
+                APP_NAME,
+                "查询历史记录已清空",
+                QSystemTrayIcon.MessageIcon.Information,
+                1800,
+            )
+
+    def show_about_dialog(self):
+        username = self.settings.get("username", DEFAULT_LOGIN_USERNAME) or "--"
+        hotkey_str = self.hotkey.upper()
+        about_text = (
+            f"<h2 style='color:#007ACC; margin-bottom: 4px;'>{APP_NAME}</h2>"
+            f"<p style='color:#555;'>银行卡 BIN 码查询与智能识别工具</p>"
+            f"<hr>"
+            f"<p><b>当前版本：</b>{APP_VERSION.upper()}</p>"
+            f"<p><b>更新时间：</b>2026-09-07</p>"
+            f"<p><b>当前账号：</b>{username}</p>"
+            f"<p><b>监听快捷键：</b>{hotkey_str}</p>"
+        )
+        box = QMessageBox(None)
+        box.setWindowTitle(f"关于 - {APP_NAME}")
+        box.setWindowIcon(get_app_icon())
+        box.setIconPixmap(get_app_icon().pixmap(48, 48))
+        box.setText(about_text)
+        box.setStandardButtons(QMessageBox.StandardButton.Ok)
+        box.exec()
 
     def do_manual_query(self, card_number: str):
         def _do_query():
@@ -1422,10 +1472,12 @@ class BinApp(QApplication):
     def _update_toggle_action_text(self):
         if not hasattr(self, "action_toggle"):
             return
-        state = "已开启" if self.is_listening else "已关闭"
-        self.action_toggle.setText(f"监听开关：{state}")
+        state = "运行中" if self.is_listening else "已暂停"
+        hint = "点击暂停" if self.is_listening else "点击恢复"
+        self.action_toggle.setText(f"监听状态：{state}（{hint}）")
+        self.action_toggle.setIcon(get_icon("monitor_toggle", is_on=self.is_listening))
         if hasattr(self, "action_hotkey"):
-            self.action_hotkey.setText(f"监听快捷键设置（当前 {self.hotkey.upper()}）")
+            self.action_hotkey.setText(f"快捷键设置（当前: {self.hotkey.upper()}）")
 
     def _toggle_monitoring(self):
         self.is_listening = not self.is_listening
@@ -1742,6 +1794,7 @@ class BinApp(QApplication):
 
 
 if __name__ == "__main__":
+    check_single_instance()
     update_ack_path = os.environ.pop("BANKBIN_UPDATE_ACK", "")
     update_ack_token = os.environ.pop("BANKBIN_UPDATE_TOKEN", "")
     if update_ack_path and update_ack_token:
