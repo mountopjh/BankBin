@@ -1,5 +1,5 @@
 ﻿# =======================================================
-# BankBin GitCode EXE 专属上传脚本 (仅上传 EXE，不传任何源码)
+# BankBin GitCode EXE 专属上传脚本 (仅上传 EXE + 专属说明，无源码)
 # =======================================================
 
 param(
@@ -11,7 +11,7 @@ if (-not $scriptDir) { $scriptDir = (Get-Location).Path }
 
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host " 正在同步 EXE 到 GitCode (国内极速分发通道)" -ForegroundColor Cyan
-Write-Host " 规则: 仅上传已编译 EXE，坚决不上传任何源码 " -ForegroundColor Cyan
+Write-Host " 规则: 仅上传已编译 EXE 与专属说明，不传源码 " -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 
 # 1. 扫描待发布的 EXE 文件
@@ -55,19 +55,27 @@ try {
     git config user.email "mountopjh@users.noreply.github.com"
     git remote add gitcode $remoteUrl
 
-    # 仅复制 EXE 文件，绝对不包含任何代码文件、配置文件或文档
+    # 复制 EXE 文件
     foreach ($f in $exeFiles) {
         Copy-Item $f.FullName -Destination .
         git add $f.Name
     }
 
+    # 复制 GitCode 专属无查询链接的 README.md
+    $readmeGitCode = Join-Path $scriptDir "README_GITCODE.md"
+    if (Test-Path $readmeGitCode) {
+        Copy-Item $readmeGitCode -Destination "README.md"
+        git add "README.md"
+        Write-Host ">> 已附带 GitCode 专属说明文档 (README.md，无查询链接)" -ForegroundColor Green
+    }
+
     $fileNames = ($exeFiles | Select-Object -ExpandProperty Name) -join ", "
     git commit -m "Release binaries: $fileNames" | Out-Null
 
-    Write-Host ">> 正在推送至 GitCode main 分支 (EXE-Only)..." -ForegroundColor Magenta
+    Write-Host ">> 正在推送至 GitCode main 分支..." -ForegroundColor Magenta
     git push gitcode main --force
     if ($LASTEXITCODE -eq 0) {
-        Write-Host ">> GitCode 同步成功！线上仓库仅含 EXE 程序，无任何源码。" -ForegroundColor Green
+        Write-Host ">> GitCode 同步成功！线上仅含 EXE 程序及说明文档，无源码或表格。" -ForegroundColor Green
     } else {
         Write-Host ">> GitCode 推送失败，请检查网络连接或 SSH 密钥权限。" -ForegroundColor Red
     }
