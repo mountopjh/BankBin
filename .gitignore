@@ -31,6 +31,19 @@ playwright_cache/
 代码地图.md
 规划地图.md
 
+# Excel and spreadsheet files
+*.xlsx
+*.xls
+*.xlsm
+*.xlsb
+*.xltx
+*.xltm
+*.xlt
+*.csv
+~$*.xlsx
+~$*.xls
+
 # OS metadata
 Thumbs.db
 .DS_Store
+
