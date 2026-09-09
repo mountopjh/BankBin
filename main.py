@@ -44,7 +44,7 @@ from ui_popup import ResultPopup
 sys.excepthook = crash_reporter.write_crash_log
 
 APP_NAME = "BankBin"
-APP_VERSION = "v1.7.6"
+APP_VERSION = "v1.7.7"
 HOTKEY_DEFAULT = "f6"
 DEFAULT_LOGIN_USERNAME = "bljw"
 DEFAULT_LOGIN_PASSWORD = "89625727"
@@ -795,24 +795,13 @@ class BinApp(QApplication):
 
         self.tray_menu.addSeparator()
 
-        self.api_menu = QMenu("查询网站", self.tray_menu)
-        for site in [
-            "1. 支付宝接口 (https://ccdcapi.alipay.com/validateAndCacheCardInfo.json)",
-            "2. CardBin (https://cardbin.cn)",
-        ]:
-            action = self.api_menu.addAction(site)
-            action.setEnabled(False)
-        self.tray_menu.addMenu(self.api_menu)
-
-        self.tray_menu.addSeparator()
-
-        self.recent_menu = QMenu("最近查询", self.tray_menu)
+        self.recent_menu = QMenu("查询记录", self.tray_menu)
         self.tray_menu.addMenu(self.recent_menu)
         self.tray_menu.aboutToShow.connect(self.update_recent_menu)
 
         self.tray_menu.addSeparator()
 
-        self.action_show = self.tray_menu.addAction("打开程序窗口")
+        self.action_show = self.tray_menu.addAction("主界面")
         self.action_show.triggered.connect(self.show_main_panel)
 
         self.panel_menu = QMenu("Panels", self.tray_menu)
@@ -1363,7 +1352,7 @@ class BinApp(QApplication):
 
     def update_recent_menu(self):
         self.recent_menu.clear()
-        history = get_query_history(success_only=True)[:20]
+        history = get_query_history(success_only=False)[:20]
         if not history:
             self.recent_menu.addAction("暂无查询记录").setEnabled(False)
             return

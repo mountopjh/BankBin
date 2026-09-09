@@ -27,6 +27,10 @@ playwright_cache/
 *.tmp
 *.bak
 
+# Local project documentation
+代码地图.md
+规划地图.md
+
 # OS metadata
 Thumbs.db
 .DS_Store
