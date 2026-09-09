@@ -52,9 +52,9 @@ $manifestFullPath = [System.IO.Path]::GetFullPath($manifestPath)
 [System.IO.File]::WriteAllText($manifestFullPath, $manifestJson, $utf8WithoutBom)
 Write-Host ">> 更新清单已同步: $($latestExe.Name)" -ForegroundColor Green
 
-# 3. 提交未保存的修改并推送代码及 Tags 到 GitCode 和 GitHub
+# 3. 提交未保存的修改并推送代码及 Tags 到 GitHub
 Write-Host "
-[3/5] 正在同步代码与版本标签到 GitCode 和 GitHub..." -ForegroundColor Magenta
+[3/5] 正在同步源码与版本标签到 GitHub..." -ForegroundColor Magenta
 $status = git status --porcelain
 if ($status) {
     git add .
@@ -68,9 +68,9 @@ if (-not $existingTag) {
     Write-Host ">> 本地创建标签: $tag" -ForegroundColor Green
 }
 
-# 双端推送
-git push origin main --tags
-Write-Host ">> 代码与 Tags 已同步推送至 GitCode 与 GitHub！" -ForegroundColor Green
+# 仅推送到 GitHub
+git push github main --tags
+Write-Host ">> 源码与 Tags 已同步推送至 GitHub！" -ForegroundColor Green
 
 # 4. 发布到 GitHub Releases
 Write-Host "
@@ -92,19 +92,20 @@ if ($ghCheck) {
     Write-Host ">> 未找到 GitHub CLI (gh)，跳过 GitHub Release 自动上传。" -ForegroundColor Yellow
 }
 
-# 5. GitCode 发布指引
+# 5. 同步 EXE 至 GitCode (仅上传 EXE)
 Write-Host "
-[5/5] GitCode 发行版设置:" -ForegroundColor Magenta
-Write-Host "GitCode Releases 页面: https://gitcode.com/mountop2026/BankBin/releases/create" -ForegroundColor Cyan
-Write-Host "已为您将最新 EXE 文件路径复制到剪贴板，并在资源管理器中选中该文件。" -ForegroundColor Green
-
-# 将路径复制到剪贴板，并在资源管理器中高亮选中 EXE
-Set-Clipboard -Value $latestExe.FullName
-& explorer.exe /select, "$($latestExe.FullName)"
+[5/5] 正在将最新编译的 EXE 同步至 GitCode (纯 EXE 分发，无源码)..." -ForegroundColor Magenta
+$gitcodeScript = Join-Path $PSScriptRoot "sync_gitcode_exe.ps1"
+if (Test-Path $gitcodeScript) {
+    & $gitcodeScript
+} else {
+    Write-Host "[WARN] 未找到 $gitcodeScript" -ForegroundColor Yellow
+}
 
 Write-Host "
 ==========================================" -ForegroundColor Cyan
 Write-Host "  发布完成！" -ForegroundColor Cyan
 Write-Host "  - GitHub:  https://github.com/mountopjh/BankBin/releases/tag/$tag" -ForegroundColor Cyan
-Write-Host "  - GitCode: https://gitcode.com/mountop2026/BankBin/releases" -ForegroundColor Cyan
+Write-Host "  - GitCode: https://gitcode.com/mountop2026/BankBin" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
+
