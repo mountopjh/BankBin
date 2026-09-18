@@ -1,5 +1,5 @@
 # =======================================================
-# BankBin Dual-Platform Release Script (GitHub + GitCode)
+# BankBin GitHub Release Script
 # =======================================================
 
 param(
@@ -7,7 +7,7 @@ param(
 )
 
 Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host "  BankBin 双平台版本发布自动化工具        " -ForegroundColor Cyan
+Write-Host "  BankBin 版本发布自动化工具 (GitHub)     " -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 
 # 1. 自动读取当前版本号
@@ -29,14 +29,14 @@ if (-not $manifest) {
     }
 }
 
-Write-Host "[1/5] 当前待发布版本: $tag" -ForegroundColor Green
+Write-Host "[1/4] 当前待发布版本: $tag" -ForegroundColor Green
 
 # 2. 查找最新的打包 EXE
 $releaseDir = "BankBin_Releases"
 $latestExe = Get-ChildItem -Path $releaseDir -Filter "BankBin_*.exe" | Sort-Object Name -Descending | Select-Object -First 1
 
 if ($latestExe) {
-    Write-Host "[2/5] 找到待发布打包文件: $($latestExe.FullName) ($([math]::Round($latestExe.Length/1MB, 2)) MB)" -ForegroundColor Green
+    Write-Host "[2/4] 找到待发布打包文件: $($latestExe.FullName) ($([math]::Round($latestExe.Length/1MB, 2)) MB)" -ForegroundColor Green
 } else {
     Write-Host "[ERROR] 未在 $releaseDir 中找到已编译的 EXE 文件，请先运行 build_root_exe.bat 进行打包！" -ForegroundColor Red
     exit 1
@@ -54,7 +54,7 @@ Write-Host ">> 更新清单已同步: $($latestExe.Name)" -ForegroundColor Green
 
 # 3. 提交未保存的修改并推送代码及 Tags 到 GitHub
 Write-Host "
-[3/5] 正在同步源码与版本标签到 GitHub..." -ForegroundColor Magenta
+[3/4] 正在同步源码与版本标签到 GitHub..." -ForegroundColor Magenta
 $status = git status --porcelain
 if ($status) {
     git add .
@@ -68,13 +68,13 @@ if (-not $existingTag) {
     Write-Host ">> 本地创建标签: $tag" -ForegroundColor Green
 }
 
-# 仅推送到 GitHub
-git push github main --tags
+# 推送到 GitHub
+git push origin main --tags
 Write-Host ">> 源码与 Tags 已同步推送至 GitHub！" -ForegroundColor Green
 
 # 4. 发布到 GitHub Releases
 Write-Host "
-[4/5] 正在发布到 GitHub Releases..." -ForegroundColor Magenta
+[4/4] 正在发布到 GitHub Releases..." -ForegroundColor Magenta
 $ghCheck = where.exe gh 2>$null
 if ($ghCheck) {
     # 检查 release 是否已存在
@@ -92,20 +92,9 @@ if ($ghCheck) {
     Write-Host ">> 未找到 GitHub CLI (gh)，跳过 GitHub Release 自动上传。" -ForegroundColor Yellow
 }
 
-# 5. 同步 EXE 至 GitCode (仅上传 EXE)
-Write-Host "
-[5/5] 正在将最新编译的 EXE 同步至 GitCode (纯 EXE 分发，无源码)..." -ForegroundColor Magenta
-$gitcodeScript = Join-Path $PSScriptRoot "sync_gitcode_exe.ps1"
-if (Test-Path $gitcodeScript) {
-    & $gitcodeScript
-} else {
-    Write-Host "[WARN] 未找到 $gitcodeScript" -ForegroundColor Yellow
-}
-
 Write-Host "
 ==========================================" -ForegroundColor Cyan
 Write-Host "  发布完成！" -ForegroundColor Cyan
 Write-Host "  - GitHub:  https://github.com/mountopjh/BankBin/releases/tag/$tag" -ForegroundColor Cyan
-Write-Host "  - GitCode: https://gitcode.com/mountop2026/BankBin" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 

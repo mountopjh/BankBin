@@ -20,7 +20,6 @@ from PyQt6.QtCore import QEvent, QMetaObject, QObject, QPoint, QSize, QTimer, Qt
 from PyQt6.QtGui import QColor, QFont, QIcon, QKeySequence, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
-    QComboBox,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -40,16 +39,18 @@ from panels.registry import build_default_registry
 from query_engine import clear_all_history, get_query_history, perform_full_query
 from settings_manager import load_settings, save_settings
 from ui_popup import ResultPopup
-from icon_assets import get_app_icon, get_eye_icon, get_icon, get_tray_icon
+from icon_assets import get_app_icon, get_icon, get_tray_icon
 
 sys.excepthook = crash_reporter.write_crash_log
 
 APP_NAME = "BankBin"
 APP_VERSION = "v1.7.7"
 HOTKEY_DEFAULT = "f6"
-DEFAULT_LOGIN_USERNAME = "bljw"
-DEFAULT_LOGIN_PASSWORD = "89625727"
 GITHUB_REPO = "mountopjh/BankBin"
+GITHUB_REPO_URL = f"https://github.com/{GITHUB_REPO}"
+GITHUB_USER_STARRED_API = "https://api.github.com/users/{username}/starred"
+GITHUB_STAR_PAGE_SIZE = 100
+GITHUB_STAR_MAX_PAGES = 50
 GITHUB_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 GITHUB_COMMITS_API = f"https://api.github.com/repos/{GITHUB_REPO}/commits"
 UPDATE_MANIFEST_PATH = "update_manifest.json"
@@ -108,30 +109,81 @@ class GlobalSignalSender(QObject):
     show_popup_signal = pyqtSignal(str, object, object)
 
 
-class LoginDialog(QDialog):
-    def __init__(self, default_username: str = "", default_password: str = "", history=None, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("账号登录")
-        self.setWindowIcon(get_app_icon())
-        self.setFixedSize(390, 270)
-        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.WindowCloseButtonHint)
+def check_github_star(username: str) -> tuple[str, str]:
+    """Check the user's current public GitHub Star state."""
+    username = str(username or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?", username):
+        return "invalid_user", "请输入正确的 GitHub 用户名"
 
-        self._history_users: list[str] = []
-        history = history or []
-        for item in history:
-            if isinstance(item, dict):
-                username = str(item.get("username", "")).strip()
-            else:
-                username = str(item or "").strip()
-            if username and username not in self._history_users:
-                self._history_users.append(username)
+    api_url = GITHUB_USER_STARRED_API.format(username=username)
+    headers = {**UPDATE_REQUEST_HEADERS, "Cache-Control": "no-cache"}
+    target_repo = GITHUB_REPO.lower()
+
+    try:
+        for page in range(1, GITHUB_STAR_MAX_PAGES + 1):
+            response = requests.get(
+                api_url,
+                headers=headers,
+                params={
+                    "per_page": GITHUB_STAR_PAGE_SIZE,
+                    "page": page,
+                    "sort": "created",
+                    "direction": "desc",
+                    "_": int(time.time()),
+                },
+                timeout=(4, 8),
+            )
+            if response.status_code == 404:
+                return "invalid_user", "未找到该 GitHub 用户，请检查用户名"
+            if response.status_code == 403:
+                return "rate_limited", "GitHub 检查次数暂时受限，程序将自动重试"
+            if response.status_code != 200:
+                return "network_error", f"GitHub 暂时无法验证（状态码 {response.status_code}）"
+
+            rows = response.json() or []
+            if not isinstance(rows, list):
+                return "network_error", "GitHub 返回了无法识别的验证结果"
+            if any(
+                str(item.get("full_name", "")).lower() == target_repo
+                for item in rows
+                if isinstance(item, dict)
+            ):
+                return "starred", "已检测到 Star，正在进入程序…"
+            if len(rows) < GITHUB_STAR_PAGE_SIZE:
+                return "not_starred", "尚未检测到该仓库的 Star"
+
+        return "rate_limited", "Star 列表较多，暂时无法完成验证，请稍后重试"
+    except (requests.RequestException, ValueError):
+        return "network_error", "网络连接异常，程序将自动重试"
+
+
+class GithubStarDialog(QDialog):
+    check_finished = pyqtSignal(str, str, str)
+
+    def __init__(
+        self,
+        default_username: str = "",
+        initial_state: str = "",
+        initial_message: str = "",
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("支持项目后继续")
+        self.setWindowIcon(get_app_icon())
+        self.setFixedSize(440, 300)
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.WindowCloseButtonHint)
+        self._check_in_progress = False
+        self._repo_opened = False
+        self._open_repo_after_check = False
+        self._verified_username = ""
 
         self.setStyleSheet(
             """
             QDialog { background-color: #FFFFFF; }
             QLabel#title { color: #007ACC; font-size: 16px; font-weight: bold; }
             QLabel#sub { color: #888888; font-size: 12px; }
-            QLineEdit, QComboBox {
+            QLabel#repo { color: #24292F; font-size: 13px; font-weight: bold; }
+            QLineEdit {
                 background-color: #F7F8FC;
                 border: 1px solid #D0D3DC;
                 color: #1A1A2E;
@@ -140,8 +192,8 @@ class LoginDialog(QDialog):
                 font-size: 13px;
                 font-family: 'Microsoft YaHei';
             }
-            QLineEdit:focus, QComboBox:focus { border: 1.5px solid #007ACC; background-color: #FFFFFF; }
-            QPushButton#login {
+            QLineEdit:focus { border: 1.5px solid #007ACC; background-color: #FFFFFF; }
+            QPushButton#primary {
                 background-color: #007ACC;
                 color: white;
                 border: none;
@@ -149,108 +201,131 @@ class LoginDialog(QDialog):
                 font-weight: bold;
                 padding: 9px;
             }
-            QPushButton#login:hover { background-color: #1C97EA; }
-            QPushButton#eye {
-                min-width: 44px;
-                max-width: 44px;
-                border: 1px solid #D0D3DC;
-                border-radius: 5px;
-                background-color: #F7F8FC;
-            }
-            QPushButton#eye:hover {
-                border-color: #007ACC;
-                background-color: #FFFFFF;
-            }
-            QPushButton#eye:checked {
-                border-color: #007ACC;
-                background-color: #FFFFFF;
-            }
+            QPushButton#primary:hover { background-color: #1C97EA; }
+            QPushButton#primary:disabled { background-color: #8CBFE0; }
             """
         )
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(30, 24, 30, 24)
-        layout.setSpacing(10)
+        layout.setContentsMargins(32, 26, 32, 24)
+        layout.setSpacing(12)
 
-        title = QLabel(APP_NAME)
+        title = QLabel("为项目点亮 Star 后继续")
         title.setObjectName("title")
-        sub = QLabel("请输入账号与密码")
+        sub = QLabel("仅首次需要填写 GitHub 用户名；以后启动将自动验证并直接进入。")
         sub.setObjectName("sub")
-        self.lbl_error = QLabel("")
-        self.lbl_error.setStyleSheet("color: #D93025; font-size: 12px; font-weight: bold;")
-        self.lbl_error.hide()
+        repo = QLabel(GITHUB_REPO_URL)
+        repo.setObjectName("repo")
 
-        self.input_user = QComboBox()
-        self.input_user.setEditable(True)
-        self.input_user.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        for username in self._history_users:
-            self.input_user.addItem(username)
-        if default_username and default_username not in self._history_users:
-            self.input_user.addItem(default_username)
-        self.input_user.setCurrentText(default_username)
-        if self.input_user.lineEdit() is not None:
-            self.input_user.lineEdit().setPlaceholderText("账号")
-        self.input_user.currentTextChanged.connect(self._on_user_changed)
+        self.input_user = QLineEdit(default_username)
+        self.input_user.setPlaceholderText("GitHub 用户名（不是邮箱）")
+        self.input_user.returnPressed.connect(self._on_primary_clicked)
 
-        self.input_pass = QLineEdit()
-        self.input_pass.setEchoMode(QLineEdit.EchoMode.Password)
-        self.input_pass.setPlaceholderText("密码")
-        self.input_pass.setText(default_password)
-        self.btn_eye = QPushButton("")
-        self.btn_eye.setObjectName("eye")
-        self.btn_eye.setCheckable(True)
-        self.btn_eye.setToolTip("显示密码")
-        self._eye_icon_visible = get_eye_icon(visible=True)
-        self._eye_icon_hidden = get_eye_icon(visible=False)
-        self._has_eye_icons = True
-        self.btn_eye.setIconSize(QSize(20, 20))
-        self.btn_eye.setIcon(self._eye_icon_hidden)
-        self.btn_eye.toggled.connect(self._toggle_password_visible)
+        self.lbl_status = QLabel(initial_message or "填写用户名后，一次点击即可打开仓库并自动验证")
+        self.lbl_status.setWordWrap(True)
+        self.lbl_status.setStyleSheet("color: #666666; font-size: 12px;")
 
-        btn_login = QPushButton(" 登录")
-        btn_login.setObjectName("login")
-        btn_login.setIcon(get_icon("login"))
-        btn_login.setIconSize(QSize(16, 16))
-
-        pass_row = QHBoxLayout()
-        pass_row.setSpacing(6)
-        pass_row.addWidget(self.input_pass)
-        pass_row.addWidget(self.btn_eye)
+        self.btn_primary = QPushButton("打开 GitHub 点亮 Star")
+        self.btn_primary.setObjectName("primary")
+        self.btn_primary.setIcon(get_icon("check"))
+        self.btn_primary.setIconSize(QSize(16, 16))
 
         layout.addWidget(title)
         layout.addWidget(sub)
-        layout.addWidget(self.lbl_error)
+        layout.addWidget(repo)
         layout.addWidget(self.input_user)
-        layout.addLayout(pass_row)
-        layout.addWidget(btn_login)
+        layout.addWidget(self.lbl_status)
+        layout.addStretch(1)
+        layout.addWidget(self.btn_primary)
 
-        btn_login.clicked.connect(self._do_accept)
-        self.input_pass.returnPressed.connect(self._do_accept)
+        self.btn_primary.clicked.connect(self._on_primary_clicked)
+        self.check_finished.connect(self._on_check_finished)
 
-    def _on_user_changed(self, username: str):
-        self.input_pass.clear()
+        self._poll_timer = QTimer(self)
+        self._poll_timer.setInterval(5000)
+        self._poll_timer.timeout.connect(lambda: self._start_check(open_repo_after_check=False))
 
-    def _load_eye_icon(self, names):
-        return get_eye_icon(visible=True)
+        if initial_state in {"network_error", "rate_limited"} and default_username:
+            self._poll_timer.setInterval(60000 if initial_state == "rate_limited" else 10000)
+            self._poll_timer.start()
 
-    def _toggle_password_visible(self, checked: bool):
-        self.input_pass.setEchoMode(
-            QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password
-        )
-        self.btn_eye.setIcon(self._eye_icon_visible if checked else self._eye_icon_hidden)
-        self.btn_eye.setText("")
-        self.btn_eye.setToolTip("隐藏密码" if checked else "显示密码")
+    def username(self) -> str:
+        return self._verified_username or self.input_user.text().strip()
 
-    def _do_accept(self):
-        user, password = self.credentials()
-        if not user or not password:
-            self.lbl_error.setText("账号或密码不能为空")
-            self.lbl_error.show()
+    def _on_primary_clicked(self):
+        if self._check_in_progress:
             return
-        self.accept()
+        self._start_check(open_repo_after_check=True)
 
-    def credentials(self):
-        return self.input_user.currentText().strip(), self.input_pass.text().strip()
+    def _start_check(self, open_repo_after_check: bool):
+        username = self.input_user.text().strip()
+        if not username:
+            self._set_status("请输入 GitHub 用户名", error=True)
+            self.input_user.setFocus()
+            return
+        if self._check_in_progress:
+            return
+
+        self._check_in_progress = True
+        self._open_repo_after_check = open_repo_after_check
+        self.btn_primary.setEnabled(False)
+        self.btn_primary.setText("正在验证…")
+        self._set_status("正在检查实时 Star 状态…")
+
+        def _worker():
+            state, message = check_github_star(username)
+            self.check_finished.emit(username, state, message)
+
+        threading.Thread(target=_worker, daemon=True, name="GithubStarChecker").start()
+
+    @pyqtSlot(str, str, str)
+    def _on_check_finished(self, username: str, state: str, message: str):
+        self._check_in_progress = False
+        self.btn_primary.setEnabled(True)
+
+        if state == "starred":
+            self._verified_username = username
+            self._poll_timer.stop()
+            self._set_status(message)
+            QTimer.singleShot(180, self.accept)
+            return
+
+        if state == "invalid_user":
+            self._poll_timer.stop()
+            self._set_status(message, error=True)
+            self.btn_primary.setText("重新验证")
+            self.input_user.selectAll()
+            self.input_user.setFocus()
+            return
+
+        if self._open_repo_after_check and state == "not_starred":
+            webbrowser.open(GITHUB_REPO_URL)
+            self._repo_opened = True
+            self._poll_timer.setInterval(5000)
+            self._poll_timer.start()
+            self._set_status("仓库已打开。点亮 Star 后无需返回操作，程序会自动进入。")
+            self.btn_primary.setText("再次打开 GitHub")
+            return
+
+        if state == "not_starred":
+            self._set_status("等待检测到 Star…点亮后将自动进入程序。")
+            self.btn_primary.setText("打开 GitHub 点亮 Star")
+            return
+
+        self._set_status(message, error=True)
+        self.btn_primary.setText("重新连接并验证")
+        self._poll_timer.setInterval(60000 if state == "rate_limited" else 10000)
+        self._poll_timer.start()
+
+    def _set_status(self, message: str, error: bool = False):
+        color = "#D93025" if error else "#666666"
+        self.lbl_status.setStyleSheet(f"color: {color}; font-size: 12px;")
+        self.lbl_status.setText(message)
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow() and self._repo_opened:
+            QTimer.singleShot(200, lambda: self._start_check(open_repo_after_check=False))
 
 
 class HotkeySettingDialog(QDialog):
@@ -614,9 +689,8 @@ class BinApp(QApplication):
         self.main_panel = self.panel_registry.get_primary_widget()
         self.popup = ResultPopup()
 
-        self._loading.update_step(38, "准备登录", "local")
-        self._loading.hide()
-        if not self._show_login_dialog():
+        self._loading.update_step(38, "验证 GitHub Star", GITHUB_REPO)
+        if not self._ensure_github_star():
             self.quit()
             return
         self._loading.show()
@@ -624,7 +698,6 @@ class BinApp(QApplication):
 
         self._loading.update_step(58, "应用首次运行策略", "query_history")
         self._apply_first_run_policy()
-        self._refresh_user_context()
 
         self._loading.update_step(78, "创建托盘菜单", "main.py")
         self.init_tray()
@@ -637,23 +710,14 @@ class BinApp(QApplication):
         QTimer.singleShot(350, self._loading.close)
 
     def _normalize_settings(self):
-        history = self.settings.get("login_history", [])
-        normalized_history = []
-        seen_users = set()
-        if isinstance(history, list):
-            for item in history:
-                if isinstance(item, dict):
-                    username = str(item.get("username", "")).strip()
-                else:
-                    username = str(item or "").strip()
-                if not username or username in seen_users:
-                    continue
-                normalized_history.append({"username": username})
-                seen_users.add(username)
-                if len(normalized_history) >= 20:
-                    break
-        self.settings["login_history"] = normalized_history
-        for key in ("password", "firebase_id_token", "firebase_refresh_token", "firebase_local_id"):
+        for key in (
+            "username",
+            "password",
+            "login_history",
+            "firebase_id_token",
+            "firebase_refresh_token",
+            "firebase_local_id",
+        ):
             self.settings.pop(key, None)
         if not self.settings.get("hotkey"):
             self.settings["hotkey"] = HOTKEY_DEFAULT
@@ -663,39 +727,23 @@ class BinApp(QApplication):
     def _normalize_hotkey(self, value: str) -> str:
         return HotkeySettingDialog.normalize_hotkey_text(value)
 
-    def _remember_login_history(self, username: str):
-        username = (username or "").strip()
-        if not username:
-            return
+    def _ensure_github_star(self) -> bool:
+        username = str(self.settings.get("github_username", "")).strip()
+        state = ""
+        message = ""
 
-        history = self.settings.get("login_history", [])
-        new_history = [{"username": username}]
-        for item in history:
-            if isinstance(item, dict):
-                old_user = str(item.get("username", "")).strip()
-            else:
-                old_user = str(item or "").strip()
-            if not old_user or old_user == username:
-                continue
-            new_history.append({"username": old_user})
-            if len(new_history) >= 20:
-                break
+        if username:
+            self.processEvents()
+            state, message = check_github_star(username)
+            if state == "starred":
+                return True
 
-        self.settings["login_history"] = new_history
-        self.settings["username"] = username
-        for key in ("password", "firebase_id_token", "firebase_refresh_token", "firebase_local_id"):
-            self.settings.pop(key, None)
-
-    def _show_login_dialog(self) -> bool:
-        user = DEFAULT_LOGIN_USERNAME
-        history = self.settings.get("login_history", [])
-
-        dlg = LoginDialog(user, DEFAULT_LOGIN_PASSWORD, history)
-        if dlg.exec() != QDialog.DialogCode.Accepted:
+        self._loading.hide()
+        dialog = GithubStarDialog(username, state, message)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
             return False
 
-        user, _password = dlg.credentials()
-        self._remember_login_history(user)
+        self.settings["github_username"] = dialog.username()
         save_settings(self.settings)
         return True
 
@@ -704,13 +752,6 @@ class BinApp(QApplication):
             clear_all_history()
             self.settings["first_run_done"] = True
             save_settings(self.settings)
-
-    def _refresh_user_context(self):
-        username = str(self.settings.get("username", "") or DEFAULT_LOGIN_USERNAME).strip()
-        if self.main_panel is not None:
-            self.main_panel.setWindowTitle(f"{APP_NAME} - 当前账号：{username}")
-        if hasattr(self, "action_user"):
-            self.action_user.setText(f"账号：{username}")
 
     def _debug_log_listener(self, message: str):
         line = f"[{format_now_seconds()}] {message}"
@@ -822,12 +863,7 @@ class BinApp(QApplication):
 
         self.tray_menu.addSeparator()
 
-        # 3. 系统与管理区（直接展示当前账号，不加二级菜单，无切换账号）
-        username = self.settings.get("username", DEFAULT_LOGIN_USERNAME) or "--"
-        self.action_user = self.tray_menu.addAction(f"当前账号：{username}")
-        self.action_user.setIcon(get_icon("account"))
-        self.action_user.setEnabled(False)
-
+        # 3. 系统与管理区
         self.update_menu = QMenu("更新与维护", self.tray_menu)
         self.update_menu.setIcon(get_icon("update"))
         self.action_version_update = self.update_menu.addAction("版本更新：检查中...")
@@ -1397,7 +1433,6 @@ class BinApp(QApplication):
             )
 
     def show_about_dialog(self):
-        username = self.settings.get("username", DEFAULT_LOGIN_USERNAME) or "--"
         hotkey_str = self.hotkey.upper()
         about_text = (
             f"<h2 style='color:#007ACC; margin-bottom: 4px;'>{APP_NAME}</h2>"
@@ -1405,7 +1440,7 @@ class BinApp(QApplication):
             f"<hr>"
             f"<p><b>当前版本：</b>{APP_VERSION.upper()}</p>"
             f"<p><b>更新时间：</b>2026-09-07</p>"
-            f"<p><b>当前账号：</b>{username}</p>"
+            f"<p><b>项目仓库：</b>{GITHUB_REPO}</p>"
             f"<p><b>监听快捷键：</b>{hotkey_str}</p>"
         )
         box = QMessageBox(None)
@@ -1422,16 +1457,6 @@ class BinApp(QApplication):
             self.signal_sender.show_popup_signal.emit(card_number, record, None)
 
         threading.Thread(target=_do_query, daemon=True).start()
-
-    def switch_account(self):
-        if not self._show_login_dialog():
-            QMessageBox.information(None, "提示", "未重新登录，程序将退出。")
-            self.quit_app()
-            return
-        self._refresh_user_context()
-        if self.main_panel is not None:
-            self.main_panel.load_history()
-        self.show_main_panel()
 
     def open_hotkey_setting_dialog(self):
         dlg = HotkeySettingDialog(self.hotkey)
